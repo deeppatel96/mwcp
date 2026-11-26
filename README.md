@@ -1,4 +1,4 @@
-# MWCP Solver wrapper
+# mwcp: Maximum Weight Clique solver wrapper
 
 Runs several **Maximum Weight Clique** solvers on one METIS graph, checks every answer,
 and reports the best one.
@@ -60,7 +60,7 @@ scripts/docker.sh shell                   # bash in the container, same mounts
 
 ```sh
 git clone --recursive <this repo>        # or: git submodule update --init --recursive
-cd "MWCP Solver"
+cd mwcp
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'                   # installs the `mwcp` command, plus cmake and pytest
 mwcp build                                # = cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
