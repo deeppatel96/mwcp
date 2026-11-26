@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # Solver binaries; MWCP_BIN_DIR overrides (e.g. for a non-editable install).

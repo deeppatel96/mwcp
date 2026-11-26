@@ -5,6 +5,8 @@ Output directory layout:
   summary.csv     the same rows without cliques, rewritten at the end of every batch
   runs.jsonl      one line per batch invocation: settings, versions, host
   solutions/      KaMIS-style 0/1 files, with --solutions
+  report.html     solver performance report (wall time, peak memory), with --plot
+  cliques/        clique views per graph and seed (.html, .dot, .svg), with --draw
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ from .solvers import get_solvers
 GRAPH_SUFFIXES = (".graph", ".metis")
 CSV_FIELDS = ["graph_name", "graph", "n", "file_edges", "m", "complement", "seed", "timeout", "solver",
               "status", "weight", "size", "proved_optimal", "best_weight", "is_best", "gap",
-              "solver_time", "wall_time", "parse_time", "message"]
+              "solver_time", "wall_time", "peak_rss_mb", "parse_time", "message"]
 
 
 def collect_graphs(inputs: Iterable[str]) -> List[Path]:
@@ -159,7 +161,7 @@ def run_batch(args, log: Callable[[str], None]) -> int:
                     "proved_optimal": r.proved_optimal, "best_weight": best_w,
                     "is_best": r.status == Status.OK and r.weight == best_w,
                     "gap": (best_w - r.weight) if (best_w is not None and r.status == Status.OK) else None,
-                    "solver_time": r.solver_time, "wall_time": r.wall_time,
+                    "solver_time": r.solver_time, "wall_time": r.wall_time, "peak_rss_mb": r.peak_rss_mb,
                     "parse_time": round(o.parse_seconds, 4), "message": r.message,
                     "clique": r.clique if r.status == Status.OK else None,
                 })
@@ -167,6 +169,15 @@ def run_batch(args, log: Callable[[str], None]) -> int:
                     sol_dir = out / "solutions"
                     sol_dir.mkdir(exist_ok=True)
                     write_kamis_solution(graph.n, r.clique, sol_dir / f"{gpath.stem}.s{seed}.{r.solver}.sol")
+            if args.draw and o.best:
+                from .viz import write_clique_view
+                try:
+                    write_clique_view(graph, [r.to_dict() for r in o.results],
+                                      out / "cliques" / f"{gpath.stem}.s{seed}.html",
+                                      title=f"Cliques: {gpath.name}", subtitle=f"seed {seed}",
+                                      max_vertices=args.max_vertices, max_edges=args.max_edges, log=log)
+                except (OSError, ValueError) as e:
+                    log(f"[error] {gpath.name}: cannot write clique view: {e}")
             with open(results_path, "a") as fh:  # append per graph: a crash loses at most one graph
                 for row in rows:
                     fh.write(json.dumps(row) + "\n")
@@ -175,4 +186,11 @@ def run_batch(args, log: Callable[[str], None]) -> int:
 
     n_rows = write_summary(results_path, csv_path) if results_path.exists() else 0
     log(f"done: {n_rows} result rows in {results_path} and {csv_path}")
+    if args.plot and n_rows:
+        from .plot import load_rows, write_report
+        try:
+            write_report(load_rows(results_path), out / "report.html")
+            log(f"performance report: {out / 'report.html'}")
+        except (OSError, ValueError) as e:
+            log(f"[error] cannot write performance report: {e}")
     return 0 if failures == 0 else 1

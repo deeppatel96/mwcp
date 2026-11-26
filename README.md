@@ -86,10 +86,11 @@ picks `dense` when KaMIS's input has edge density ≥ 0.5. That's the usual case
 complement of H, which is dense when H is sparse. KaMIS's initial reductions don't check the
 time limit. On a 3000-vertex graph at 99% density, `normal` took 40 s and `dense` took 3 s.
 
-Output is a table (solver, status, weight, clique size, solver time, wall time, proven optimal),
+Output is a table (solver, status, weight, clique size, solver time, wall time, peak memory, proven optimal),
 followed by the best result.
 
 - `--json PATH` writes the full results, including every clique (0-based vertex ids). Use `-` for stdout.
+- `--plot PATH` writes an HTML performance report (wall time, peak memory) (see [Performance reports](#performance-reports-mwcp-plot)).
 - `--solution-out DIR` writes **KaMIS-style** solution files, with one `0`/`1` line per vertex:
   `<graph>.<solver>.sol` for each valid result, plus `<graph>.best.sol`. On a complement graph,
   this file can be used in place of KaMIS's MWIS output.
@@ -110,6 +111,7 @@ the given directories) once per seed. It takes the same solver options as `solve
 | `summary.csv` | the same rows without cliques, rewritten at the end. Ready for pandas or a spreadsheet. |
 | `runs.jsonl` | one line per `batch` call: command line, settings, repo commit, host (platform, CPU count, Python). |
 | `solutions/` | with `--solutions`, `<graph>.s<seed>.<solver>.sol` in KaMIS 0/1 format. |
+| `report.html` | with `--plot`, the performance report (wall time, peak memory) for every result in `results.jsonl`. |
 
 `--resume` skips (graph, seed) pairs that already have results with the same settings
 (`--complement`, `--timeout`, `--kamis-reductions`), so an interrupted batch can be restarted.
@@ -119,6 +121,67 @@ side by side makes them compete for cores.
 Each result is **verified** against the input: the vertices must form a clique, and their weights
 must add up to the reported weight. A result that fails gets status `invalid`. Other statuses are
 `timeout` (killed by the wrapper after timeout + max(10 s, 50%) grace), `error` and `unavailable`.
+
+### Performance reports: `mwcp plot`
+
+```sh
+mwcp solve graph.metis -t 60 --plot report.html                  # one graph
+mwcp batch graphs/ -t 300 --seeds 0,1,2 -o results/run1 --plot   # -> results/run1/report.html
+mwcp plot results/run1 [-o report.html] [--graphs a,b] [--title ...]   # re-plot saved results
+```
+
+The report is one self-contained HTML file with no external assets. Open it in any browser.
+It compares the solvers on **wall time** and **peak memory**, each in its own charts: the median
+per solver over all runs, and for a batch the same per graph (the bar is the median over seeds,
+the whisker spans the lowest to the highest seed). Hover a bar to see min/max/mean, weights, how
+often the solver found the best clique or proved optimality, and any timeouts or errors. A table
+of every result sits underneath. An axis switches to log scale when its values span more than two
+orders of magnitude.
+
+- **Wall time** is measured by mwcp and includes the solver reading its input file. Heuristics
+  that always use the whole time limit (OpenPLS) are flagged, because their bars show the limit,
+  not their speed.
+- **Peak memory** is the solver process's peak resident set size (`ru_maxrss`), reported in MiB
+  as `peak_rss_mb` in the table output, JSON, `results.jsonl` and `summary.csv`. Solvers are
+  started through `bin/mwcp_exec`, a tiny C launcher that runs the solver and reads its
+  `ru_maxrss` when it exits. Started straight from Python, a solver's peak on Linux would include
+  the memory of the Python process it was forked from. The launcher adds about 0.3 ms per run and
+  also records memory for timed-out runs. The figure doesn't include mwcp's own memory or the
+  one-off conversion of the input (e.g. building the complement for KaMIS). If `mwcp_exec` isn't
+  built, solvers run directly and memory is left empty.
+- Timed-out runs are counted at the moment they were killed.
+
+`mwcp plot` also reads a `mwcp solve --json` file, so results copied off a server can be plotted
+anywhere mwcp is installed.
+
+### Clique view: `mwcp draw`
+
+```sh
+mwcp solve graph.metis --draw view.html                          # -> view.html, view.dot (+ view.svg)
+mwcp batch graphs/ -o results/run1 --draw                        # -> results/run1/cliques/<graph>.s<seed>.*
+mwcp draw results/run1 [--graph-name g] [--seed 0] [-o view.html]   # from saved results
+mwcp draw results.jsonl --graph ~/graphs/g.graph                 # results copied off a server
+```
+
+Draws the MWC graph (the complement of the file with `--complement`) with the cliques
+highlighted:
+
+- **`.html`:** an interactive, self-contained page. There's one button per solver that returned
+  a clique, and the best clique is selected first. When another solver's clique is selected, the
+  best clique's vertices it misses are outlined. Hover a vertex for its id (0-based, as in the
+  JSON output), weight, and how many best-clique vertices it's adjacent to. A table lists every
+  clique.
+- **Layout:** the cliques sit on a center ring. Every other vertex sits on an outer ring, closer
+  the more best-clique vertices it's adjacent to, and turned toward the ones it connects to. So
+  the vertices that nearly extend the clique are the ones next to it. The layout is
+  deterministic and stays readable on dense graphs.
+- **Size limits:** up to `--max-vertices` (300) vertices and `--max-edges` (4000) edges, the whole
+  graph is drawn. Larger graphs get a reduced view: every clique vertex, then the vertices adjacent
+  to the most best-clique vertices. Edges at the cliques are always kept, and others are kept up
+  to the edge limit. The page says how much was left out.
+- **`.dot` / `.svg`:** the same view with positions pinned, rendered to `.svg` with Graphviz's
+  `neato -n2` (installed in the Docker image), so it has the same layout as the HTML. Other Graphviz engines (e.g. `sfdp`) ignore the pinned positions and
+  lay the graph out themselves.
 
 ### Input format
 

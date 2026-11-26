@@ -13,6 +13,7 @@ FROM ubuntu:20.04
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential python3 python3-venv python3-pip ca-certificates \
+    graphviz \
  && rm -rf /var/lib/apt/lists/*
 
 # Ubuntu 20.04 ships CMake 3.16 and the build needs >= 3.20, so CMake comes from pip.

@@ -21,6 +21,7 @@ class SolverResult:
     proved_optimal: bool = False
     solver_time: Optional[float] = None   # time reported by the solver itself
     wall_time: Optional[float] = None     # wall time measured by the wrapper
+    peak_rss_mb: Optional[float] = None   # peak resident memory of the solver process (MiB)
     message: str = ""
     returncode: Optional[int] = None
 

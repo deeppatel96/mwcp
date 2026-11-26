@@ -23,6 +23,9 @@ target_include_directories(metis_io PUBLIC drivers)
 target_compile_options(metis_io PRIVATE -Wall -Wextra)
 
 # ---------------------------------------------------------------- graph conversion tool (complement, OpenPLS input)
+# Launcher that runs a solver and reports its own peak RSS (plain C: tiny, so it adds ~1 MiB at most).
+add_executable(mwcp_exec drivers/mwcp_exec.c)
+
 add_executable(metis_tool drivers/metis_tool.cpp)
 target_link_libraries(metis_tool PRIVATE metis_io)
 

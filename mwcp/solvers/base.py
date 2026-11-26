@@ -22,6 +22,20 @@ def grace_seconds(timeout: float) -> float:
     return max(10.0, 0.5 * timeout)
 
 
+LAUNCHER = "mwcp_exec"   # drivers/mwcp_exec.c: runs the solver and reports its peak RSS
+_RSS_FILE = ".mwcp_rss"
+_RSS_RE = re.compile(r"maxrss_kib=(\d+)")
+
+
+def read_peak_rss_mb(path: Path) -> Optional[float]:
+    """Peak RSS in MiB from the launcher's report file, or None if there is none."""
+    try:
+        m = _RSS_RE.search(path.read_text())
+    except OSError:
+        return None
+    return round(int(m.group(1)) / 1024, 2) if m and int(m.group(1)) > 0 else None
+
+
 @dataclass
 class RunContext:
     workdir: Path        # private temp dir for this solver run (e.g. output files)
@@ -68,6 +82,12 @@ class Solver(ABC):
             except PrepError as e:
                 res.message = str(e)
                 return res
+            # Run through the launcher when it is built, so the solver's peak memory is measured.
+            launcher = BIN_DIR / LAUNCHER
+            measured = launcher.is_file() and os.access(launcher, os.X_OK)
+            rss_file = workdir / _RSS_FILE
+            if measured:
+                cmd = [str(launcher), str(rss_file)] + list(cmd)
             t0 = time.monotonic()
             # New session so a timeout kill takes down the solver's whole process group.
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -75,16 +95,24 @@ class Solver(ABC):
             try:
                 out, err = proc.communicate(timeout=timeout + grace_seconds(timeout))
             except subprocess.TimeoutExpired:
+                if measured:  # the launcher kills the solver, reaps it and writes its peak RSS
+                    proc.send_signal(signal.SIGTERM)
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    os.killpg(proc.pid, signal.SIGKILL)  # anything left in the group
                 except ProcessLookupError:
                     pass
                 proc.communicate()
                 res.status = Status.TIMEOUT
                 res.wall_time = time.monotonic() - t0
+                res.peak_rss_mb = read_peak_rss_mb(rss_file) if measured else None
                 res.message = f"killed after {timeout + grace_seconds(timeout):.1f}s wall time"
                 return res
             res.wall_time = time.monotonic() - t0
+            res.peak_rss_mb = read_peak_rss_mb(rss_file) if measured else None
             res.returncode = proc.returncode
 
             if proc.returncode != 0:
