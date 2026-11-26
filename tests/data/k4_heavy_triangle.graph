@@ -1,0 +1,11 @@
+% K4 on {1,2,3,4} (weights 1 each, total 4) vs heavy triangle {5,6,7} (weight 10 each, total 30)
+% vertex 8 is isolated with weight 25; edge 4-5 links the two parts.
+8 10 10
+1 2 3 4
+1 1 3 4
+1 1 2 4
+1 1 2 3 5
+10 4 6 7
+10 5 7
+10 5 6
+25
