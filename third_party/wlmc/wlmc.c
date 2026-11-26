@@ -3198,7 +3198,11 @@ static void rebuild_matrix(int start) {
 }
 
 static int REBUILD_MATRIX = FALSE;
+/* MWCP-WRAPPER: track numbering of MaxCLQ_Stack and whether the search hit the cutoff */
+static int MWCP_CLQ_RENAMED = FALSE;
+static int MWCP_TIMED_OUT = FALSE;
 static void store_maximal_weighted_clique() {
+	MWCP_CLQ_RENAMED = TRUE; /* MWCP-WRAPPER */
 	memcpy(MaxCLQ_Stack, Clique_Stack, CUR_CLQ_SIZE * sizeof(int));
 
 	if (CUR_CLQ_SIZE == 0)
@@ -3304,6 +3308,7 @@ static int compute_subgraphs_weight(int start) {
 
 }
 static void store_maximal_weighted_clique2() {
+	MWCP_CLQ_RENAMED = TRUE; /* MWCP-WRAPPER */
 	memcpy(MaxCLQ_Stack, Clique_Stack, CUR_CLQ_SIZE * sizeof(int));
 
 	MAX_CLQ_SIZE = CUR_CLQ_SIZE;
@@ -4144,6 +4149,7 @@ static void search_maxclique(double cutoff, int using_init_clique) {
 	    SEARCH_TIME = get_utime() - READ_TIME - INIT_TIME;
 	    if (SEARCH_TIME >= cutoff){
 	        printf("Not solving to optimality; user time limit\n");
+	        MWCP_TIMED_OUT = TRUE; /* MWCP-WRAPPER */
 	        break;
 	    }
 
@@ -4768,3 +4774,20 @@ int wlmc(int NB_NODE1, int NB_EDGE1, double cutoff, int** AdjacentList, int* Nod
     return MAX_CLQ_WEIGHT;
 }
 
+
+
+/* MWCP-WRAPPER: accessors for the best clique found by the last wlmc() call. */
+/* Writes 0-based input vertex ids into out (capacity >= wlmc_clique_size()). */
+int wlmc_clique_size(void) { return MAX_CLQ_SIZE; }
+int wlmc_get_clique(int *out) {
+	int i;
+	for (i = 0; i < MAX_CLQ_SIZE; i++) {
+		int v = MaxCLQ_Stack[i];
+		if (MWCP_CLQ_RENAMED)
+			v = Old_Name[v]; /* reduced/renamed id -> 1-based input id */
+		out[i] = v - 1;
+	}
+	return MAX_CLQ_SIZE;
+}
+int wlmc_timed_out(void) { return MWCP_TIMED_OUT; }
+int wlmc_max_nodes(void) { return MAX_NODE - 2; }

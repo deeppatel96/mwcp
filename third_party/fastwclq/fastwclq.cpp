@@ -726,6 +726,8 @@ bool better_since_simp=true;
 
 //int main(int argc, char const *argv[]) {
 
+static bool mwcp_exact = false; /* MWCP-WRAPPER */
+
 int fastwclq(int vertex_count, int nb_edge, double cutoff_time, int** AdjacentList, int* Node_Degree, int* Node_Weight, int* Node_Bound){
 
 
@@ -809,6 +811,7 @@ int fastwclq(int vertex_count, int nb_edge, double cutoff_time, int** AdjacentLi
 			
 			if (remaining_vertex.empty()) {
 				exact=true;
+				mwcp_exact=true; /* MWCP-WRAPPER */
 				break;
 			}
 		} 
@@ -839,3 +842,15 @@ int fastwclq(int vertex_count, int nb_edge, double cutoff_time, int** AdjacentLi
 //	output_graph_size();
 	return best_solution_weight;
 }
+
+
+/* MWCP-WRAPPER: accessors for the best clique found by the last fastwclq() call. */
+/* best_solution holds 1-based input ids (simplification never renumbers). */
+int fastwclq_clique_size() { return (int) best_solution.size(); }
+int fastwclq_get_clique(int *out) {
+	int k = 0;
+	for (auto v : best_solution) out[k++] = (int) (v - 1);
+	return k;
+}
+/* True when the simplification emptied the graph, i.e. the clique is proven optimal. */
+int fastwclq_proved_optimal() { return mwcp_exact ? 1 : 0; }
