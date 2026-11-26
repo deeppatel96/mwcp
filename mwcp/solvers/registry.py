@@ -3,10 +3,13 @@ from typing import Dict, List
 
 from .base import Solver
 from .fastwclq import FastWClq
+from .kamis import KaMISBranchReduce, KaMISLocalSearch
 from .openpls import OpenPLS
 from .wlmc import WLMC
 
-REGISTRY: Dict[str, Solver] = {s.name: s for s in (WLMC(), FastWClq(), OpenPLS())}
+REGISTRY: Dict[str, Solver] = {
+    s.name: s for s in (WLMC(), FastWClq(), OpenPLS(), KaMISBranchReduce(), KaMISLocalSearch())
+}
 
 
 def get_solvers(spec: str) -> List[Solver]:

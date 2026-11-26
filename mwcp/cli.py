@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import List
 
 from . import BIN_DIR, REPO_ROOT, __version__
 from .graph import GraphFormatError, read_metis, write_kamis_solution
+from .instance import Instance, PrepError
 from .result import SolverResult, Status
 from .solvers import REGISTRY, get_solvers
 
@@ -29,6 +31,8 @@ def _cmd_build(args) -> int:
         if subprocess.call(cmd) != 0:
             return 1
     missing = [s.binary for s in REGISTRY.values() if not s.available()]
+    if not (BIN_DIR / "metis_tool").is_file():
+        missing.append("metis_tool")
     if missing:
         print(f"error: missing binaries in {BIN_DIR}: {', '.join(missing)}", file=sys.stderr)
         return 1
@@ -71,32 +75,47 @@ def _cmd_solve(args) -> int:
     except KeyError as e:
         print(f"error: {e.args[0]}", file=sys.stderr)
         return 2
+    log = (lambda *a: None) if args.quiet else (lambda msg: print(msg, file=sys.stderr, flush=True))
+
     t0 = time.monotonic()
     try:
-        graph = read_metis(graph_path)
+        graph = read_metis(graph_path, complement=args.complement)
     except (OSError, GraphFormatError, ValueError) as e:
         print(f"error: cannot read {graph_path}: {e}", file=sys.stderr)
         return 2
-    if not args.quiet:
-        print(f"graph {graph_path.name}: n={graph.n} m={graph.m} "
-              f"(parsed in {time.monotonic() - t0:.2f}s); solvers: {', '.join(s.name for s in solvers)}; "
-              f"timeout {args.timeout}s", file=sys.stderr)
+    what = "complement of input" if args.complement else "input as given"
+    log(f"graph {graph_path.name}: n={graph.n}, file m={graph.file_edges}; solving MWC on {what} "
+        f"(m={graph.m}); parsed in {time.monotonic() - t0:.2f}s")
 
-    def run(s):
-        r = s.run(graph_path, graph, args.timeout, args.seed)
-        if not args.quiet:
-            print(f"  {s.name}: {r.status} weight={r.weight}", file=sys.stderr)
-        return r
+    with tempfile.TemporaryDirectory(prefix="mwcp-") as tmp:
+        inst = Instance(graph_path, graph, Path(tmp), options={"kamis_reductions": args.kamis_reductions})
+        # Build every derived input file once, up front, so parallel runs don't race on them.
+        needs = sorted({n for s in solvers if s.available() for n in s.needs})
+        try:
+            inst.prepare(needs)
+        except PrepError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        for k, secs in inst.prep_seconds.items():
+            if inst._cache[k] != graph_path:
+                log(f"  built {k} input in {secs:.2f}s")
+        log(f"solvers: {', '.join(s.name for s in solvers)}; timeout {args.timeout}s")
 
-    if args.parallel and len(solvers) > 1:
-        with ThreadPoolExecutor(max_workers=len(solvers)) as ex:
-            results = list(ex.map(run, solvers))
-    else:
-        results = [run(s) for s in solvers]
+        def run(s):
+            r = s.run(inst, args.timeout, args.seed)
+            log(f"  {s.name}: {r.status} weight={r.weight}")
+            return r
+
+        if args.parallel and len(solvers) > 1:
+            with ThreadPoolExecutor(max_workers=len(solvers)) as ex:
+                results = list(ex.map(run, solvers))
+        else:
+            results = [run(s) for s in solvers]
 
     valid = [r for r in results if r.status == Status.OK]
-    best = max(valid, key=lambda r: r.weight) if valid else None
-    # An exact solver's proven optimum lower than a heuristic's verified clique would be a bug.
+    # Highest weight wins; on ties prefer a solver that proved optimality.
+    best = max(valid, key=lambda r: (r.weight, r.proved_optimal)) if valid else None
+    # A proven optimum below another solver's verified clique would mean a solver bug.
     for r in valid:
         if r.proved_optimal and best and r.weight < best.weight:
             r.message = (r.message + "; " if r.message else "") + \
@@ -104,8 +123,9 @@ def _cmd_solve(args) -> int:
 
     print(_fmt_table(results))
     if best:
+        provers = [r.solver for r in valid if r.proved_optimal and r.weight == best.weight]
         print(f"\nbest: {best.solver} weight={best.weight} size={len(best.clique)}"
-              f"{' (proven optimal)' if any(r.proved_optimal and r.weight == best.weight for r in valid) else ''}")
+              f"{' (proven optimal by ' + ', '.join(provers) + ')' if provers else ''}")
 
     if args.solution_out:
         out = Path(args.solution_out)
@@ -117,7 +137,8 @@ def _cmd_solve(args) -> int:
 
     if args.json:
         payload = {
-            "graph": str(graph_path), "n": graph.n, "m": graph.m,
+            "graph": str(graph_path), "n": graph.n, "file_edges": graph.file_edges,
+            "complement": args.complement, "m": graph.m,
             "timeout": args.timeout, "seed": args.seed,
             "best": None if best is None else {"solver": best.solver, "weight": best.weight, "clique": best.clique},
             "results": [r.to_dict() for r in results],
@@ -141,7 +162,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-s", "--solvers", default="all",
                    help=f"comma list or 'all' (default). Available: {', '.join(REGISTRY)}")
     s.add_argument("-t", "--timeout", type=float, default=60.0, help="per-solver time limit in seconds (default 60)")
+    s.add_argument("-c", "--complement", action="store_true",
+                   help="the input is the complement: solve MWC on the complement of the input file")
     s.add_argument("--seed", type=int, default=0, help="random seed for heuristic solvers")
+    s.add_argument("--kamis-reductions", choices=["auto", "normal", "dense"], default="auto",
+                   help="KaMIS --reduction_style; auto picks 'dense' when KaMIS's input "
+                        "(complement of the MWC graph) has density >= 0.5 (default auto)")
     s.add_argument("-p", "--parallel", action="store_true", help="run solvers concurrently")
     s.add_argument("--json", metavar="PATH", help="write full results as JSON ('-' for stdout)")
     s.add_argument("--solution-out", metavar="DIR",

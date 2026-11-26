@@ -22,6 +22,10 @@ add_library(metis_io STATIC drivers/common/metis_io.cpp)
 target_include_directories(metis_io PUBLIC drivers)
 target_compile_options(metis_io PRIVATE -Wall -Wextra)
 
+# ---------------------------------------------------------------- graph conversion tool (complement, OpenPLS input)
+add_executable(metis_tool drivers/metis_tool.cpp)
+target_link_libraries(metis_tool PRIVATE metis_io)
+
 # ---------------------------------------------------------------- WLMC (exact)
 add_executable(wlmc_cli drivers/wlmc_main.cpp third_party/wlmc/wlmc.c)
 target_include_directories(wlmc_cli PRIVATE third_party/wlmc)
@@ -43,3 +47,37 @@ file(GLOB OPENPLS_SOURCES CONFIGURE_DEPENDS ${OPENPLS_DIR}/src/*.cpp)
 add_executable(pls ${OPENPLS_SOURCES})
 target_compile_definitions(pls PRIVATE GIT_COMMIT=93408ab GIT_STATUS=vendored-submodule)
 target_compile_options(pls PRIVATE ${THIRD_PARTY_WARN_OFF})
+
+# ---------------------------------------------------------------- KaMIS (submodule, MWIS on the complement graph)
+# KaMIS refers to CMAKE_SOURCE_DIR internally, so it must be its own CMake project
+# (ExternalProject), not add_subdirectory. Only the weighted (wmis) solvers are built.
+include(ExternalProject)
+set(KAMIS_DIR ${CMAKE_SOURCE_DIR}/third_party/KaMIS)
+option(MWCP_WITH_KAMIS "Build the KaMIS weighted MIS solvers" ON)
+if(MWCP_WITH_KAMIS)
+  if(NOT EXISTS ${KAMIS_DIR}/CMakeLists.txt)
+    message(FATAL_ERROR "KaMIS submodule missing: run `git submodule update --init third_party/KaMIS`")
+  endif()
+  set(KAMIS_BUILD ${CMAKE_BINARY_DIR}/kamis)
+  # Use real OpenMP if the compiler has it; otherwise put a serial omp.h stub on the include path.
+  find_package(OpenMP COMPONENTS CXX QUIET)
+  # (Passed as a standard include dir so CMake quotes it: the repo path may contain spaces.)
+  set(KAMIS_EXTRA_ARGS "")
+  if(NOT OpenMP_CXX_FOUND)
+    message(STATUS "KaMIS: no OpenMP runtime found, building serially with cmake/omp_stub")
+    set(KAMIS_EXTRA_ARGS "-DCMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES=${CMAKE_SOURCE_DIR}/cmake/omp_stub")
+  endif()
+  ExternalProject_Add(kamis
+    SOURCE_DIR ${KAMIS_DIR}
+    BINARY_DIR ${KAMIS_BUILD}
+    CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release
+               -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+               -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+               -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+               ${KAMIS_EXTRA_ARGS}
+    BUILD_COMMAND ${CMAKE_COMMAND} --build ${KAMIS_BUILD} --target branch_reduce weighted_ls -j
+    INSTALL_COMMAND ${CMAKE_COMMAND} -E copy ${KAMIS_BUILD}/wmis/branch_reduce ${CMAKE_SOURCE_DIR}/bin/kamis_branch_reduce
+            COMMAND ${CMAKE_COMMAND} -E copy ${KAMIS_BUILD}/wmis/weighted_ls ${CMAKE_SOURCE_DIR}/bin/kamis_weighted_ls
+    BUILD_ALWAYS ON
+    USES_TERMINAL_BUILD ON)
+endif()

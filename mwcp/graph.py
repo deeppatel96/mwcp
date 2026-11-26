@@ -12,13 +12,28 @@ class GraphFormatError(ValueError):
 
 @dataclass
 class Graph:
+    """A parsed METIS file, optionally viewed as its complement.
+
+    `adj` always holds the file's own adjacency. With `complemented=True` the graph *meant*
+    is the complement (same vertices and weights), but it's never built: edge queries invert.
+    """
     n: int
     weights: List[int]
-    adj: List[Set[int]] = field(repr=False)  # 0-based neighbor sets
+    adj: List[Set[int]] = field(repr=False)  # 0-based neighbor sets, as in the file
+    complemented: bool = False
+
+    @property
+    def file_edges(self) -> int:
+        return sum(len(a) for a in self.adj) // 2
 
     @property
     def m(self) -> int:
-        return sum(len(a) for a in self.adj) // 2
+        """Edge count of the graph meant (the complement, if complemented)."""
+        e = self.file_edges
+        return self.n * (self.n - 1) // 2 - e if self.complemented else e
+
+    def has_edge(self, u: int, v: int) -> bool:
+        return u != v and ((v in self.adj[u]) != self.complemented)
 
     def clique_violation(self, clique: Sequence[int]) -> Optional[str]:
         """Return why `clique` is not a clique of this graph, or None if it is one."""
@@ -31,9 +46,8 @@ class Graph:
             seen.add(v)
         verts = list(seen)
         for i, u in enumerate(verts):
-            au = self.adj[u]
             for v in verts[i + 1:]:
-                if v not in au:
+                if not self.has_edge(u, v):
                     return f"vertices {u} and {v} are not adjacent"
         return None
 
@@ -50,8 +64,11 @@ def _content_lines(path: Path):
             yield line
 
 
-def read_metis(path: str | Path) -> Graph:
-    """Parse a METIS file. Mirrors drivers/common/metis_io.cpp (symmetrizes, drops loops)."""
+def read_metis(path: str | Path, complement: bool = False) -> Graph:
+    """Parse a METIS file. Mirrors drivers/common/metis_io.cpp (symmetrizes, drops loops).
+
+    With complement=True the returned Graph stands for the file's complement.
+    """
     lines = _content_lines(Path(path))
     header = None
     for line in lines:
@@ -93,25 +110,7 @@ def read_metis(path: str | Path) -> Graph:
                 adj[u].add(v)
     if v != n - 1:
         raise GraphFormatError(f"file ends after {v + 1} of {n} vertex lines")
-    return Graph(n=n, weights=weights, adj=adj)
-
-
-def write_openpls_input(g: Graph, graph_path: Path) -> Path:
-    """Write OpenPLS's input: unweighted METIS `<x>.graph` plus `<x>.graph.weights`.
-
-    OpenPLS's reader is strict: no comments, no trailing spaces, one line per vertex.
-    Returns the weights file path.
-    """
-    with open(graph_path, "w") as fh:
-        fh.write(f"{g.n} {g.m}\n")
-        for v in range(g.n):
-            fh.write(" ".join(str(u + 1) for u in sorted(g.adj[v])))
-            fh.write("\n")
-    wpath = Path(str(graph_path) + ".weights")
-    with open(wpath, "w") as fh:
-        for v, w in enumerate(g.weights):
-            fh.write(f"{v} {w}\n")
-    return wpath
+    return Graph(n=n, weights=weights, adj=adj, complemented=complement)
 
 
 def write_kamis_solution(n: int, clique: Iterable[int], path: str | Path) -> None:

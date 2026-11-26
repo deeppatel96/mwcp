@@ -1,3 +1,6 @@
 [submodule "third_party/open-pls"]
 	path = third_party/open-pls
 	url = https://github.com/darrenstrash/open-pls
+[submodule "third_party/KaMIS"]
+	path = third_party/KaMIS
+	url = https://github.com/KarlsruheMIS/KaMIS

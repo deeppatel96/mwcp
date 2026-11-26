@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from mwcp.graph import Graph
+from mwcp.graph import Graph, read_metis
+from mwcp.instance import Instance
 
 DATA = Path(__file__).parent / "data"
 
@@ -48,6 +49,16 @@ def random_graph(n, p, seed, wmax=200):
     weights = [rng.randint(1, wmax) for _ in range(n)]
     edges = [(u, v) for u in range(n) for v in range(u + 1, n) if rng.random() < p]
     return weights, edges
+
+
+def complement_edges(n, edges):
+    present = {(min(u, v), max(u, v)) for u, v in edges}
+    return [(u, v) for u in range(n) for v in range(u + 1, n) if (u, v) not in present]
+
+
+def make_instance(path: Path, workdir: Path, complement: bool = False) -> Instance:
+    workdir.mkdir(parents=True, exist_ok=True)
+    return Instance(path, read_metis(path, complement=complement), workdir)
 
 
 @pytest.fixture

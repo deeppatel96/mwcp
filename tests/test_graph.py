@@ -46,3 +46,12 @@ def test_kamis_solution(tmp_path):
     p = tmp_path / "s.sol"
     write_kamis_solution(4, [1, 3], p)
     assert p.read_text() == "0\n1\n0\n1\n"
+
+
+def test_complemented_view(data_dir):
+    g = read_metis(data_dir / "k4_heavy_triangle.graph", complement=True)
+    assert g.file_edges == 10 and g.m == 28 - 10
+    assert not g.has_edge(4, 5) and g.has_edge(0, 4) and g.has_edge(7, 0)
+    assert not g.has_edge(3, 3)
+    assert g.clique_violation([0, 4, 7]) is None      # pairwise non-adjacent in the file
+    assert g.clique_violation([4, 5]) is not None
