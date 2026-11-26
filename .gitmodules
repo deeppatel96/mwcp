@@ -1,0 +1,3 @@
+[submodule "third_party/open-pls"]
+	path = third_party/open-pls
+	url = https://github.com/darrenstrash/open-pls
