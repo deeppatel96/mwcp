@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mwcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "Run several Maximum Weight Clique solvers (WLMC, FastWClq, OpenPLS) on a METIS graph"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = []
 
 [project.optional-dependencies]

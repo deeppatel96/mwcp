@@ -25,7 +25,38 @@ Every solver gets the graph in the shape it needs. The conversions are done once
 | OpenPLS | H, unweighted METIS + `.weights` | converted | converted + complemented |
 | KaMIS | complement of H, as METIS | complement of the input file | **the input file as is** |
 
-## Build
+## Docker (Ubuntu 20.04)
+
+Building, testing and running experiments all happen in the container defined by `Dockerfile`.
+`scripts/docker.sh` wraps the `docker` commands:
+
+```sh
+git submodule update --init               # the submodule sources are copied into the image
+scripts/docker.sh build                   # build the image mwcp:ubuntu20 (compiles all solvers)
+scripts/docker.sh test                    # run the test suite inside the container
+
+# Experiments: graphs from DATA_DIR (default ./data) appear read-only at /data, and
+# RESULTS_DIR (default ./results) at /results. Output files are owned by you, not root.
+DATA_DIR=~/graphs scripts/docker.sh mwcp batch /data -t 300 --seeds 0,1,2 -o /results/run1
+scripts/docker.sh mwcp solve /data/g.graph -t 60 --complement
+scripts/docker.sh shell                   # bash in the container, same mounts
+```
+
+- The image uses the stock Ubuntu 20.04 toolchain: gcc 9, Python 3.8 and OpenMP (so KaMIS builds with
+  real OpenMP). CMake comes from pip, because 20.04's 3.16 is too old.
+- KaMIS is compiled with `-march=native` by default, which tunes it to the **CPU of the machine
+  that builds the image**. If you build on one machine and run on another, build with
+  `PORTABLE=ON scripts/docker.sh build`. Locally, `mwcp build --portable` does the same.
+- Docker on an Apple Silicon Mac builds an arm64 image by default. For an x86_64 server, build
+  there, or cross-build with `PORTABLE=ON scripts/docker.sh build --platform linux/amd64`
+  (emulated, so slow).
+- The image records the repo commit, which `batch` writes to `runs.jsonl`. A `-dirty` suffix means
+  the working tree had uncommitted changes.
+- Plain docker also works: `docker build -t mwcp:ubuntu20 .`, then
+  `docker run --rm -v $PWD/data:/data:ro -v $PWD/results:/results mwcp:ubuntu20 batch /data -o /results/run1`.
+  The image's entrypoint is `mwcp`.
+
+## Local build (macOS / Linux)
 
 ```sh
 git clone --recursive <this repo>        # or: git submodule update --init --recursive
@@ -64,6 +95,27 @@ followed by the best result.
   this file can be used in place of KaMIS's MWIS output.
 - Exit code: `0` if at least one solver returned a valid clique, `1` if none did, `2` for bad input.
 
+### Experiments: `mwcp batch`
+
+```sh
+mwcp batch graphs/ more/g.graph -t 300 --seeds 0,1,2 -o results/run1 [--complement] [--solutions] [--resume]
+```
+
+This runs every selected solver on every graph (files, or all `*.graph` / `*.metis` files in
+the given directories) once per seed. It takes the same solver options as `solve`. In `-o DIR`:
+
+| File | Contents |
+|---|---|
+| `results.jsonl` | one record per (graph, seed, solver): status, weight, size, proven optimal, best weight for that graph, gap to it, solver and wall time, clique. Appended after each graph, so a crash loses at most the current graph. |
+| `summary.csv` | the same rows without cliques, rewritten at the end. Ready for pandas or a spreadsheet. |
+| `runs.jsonl` | one line per `batch` call: command line, settings, repo commit, host (platform, CPU count, Python). |
+| `solutions/` | with `--solutions`, `<graph>.s<seed>.<solver>.sol` in KaMIS 0/1 format. |
+
+`--resume` skips (graph, seed) pairs that already have results with the same settings
+(`--complement`, `--timeout`, `--kamis-reductions`), so an interrupted batch can be restarted.
+For timing comparisons, leave out `-p`: WLMC and FastWClq cut off on CPU time, and running solvers
+side by side makes them compete for cores.
+
 Each result is **verified** against the input: the vertices must form a clique, and their weights
 must add up to the reported weight. A result that fails gets status `invalid`. Other statuses are
 `timeout` (killed by the wrapper after timeout + max(10 s, 50%) grace), `error` and `unavailable`.
@@ -83,7 +135,8 @@ weight sum must fit in a 32-bit int (WLMC and FastWClq use `int`). WLMC accepts 
 ## Tests
 
 ```sh
-python -m pytest
+python -m pytest              # locally
+scripts/docker.sh test        # in the Ubuntu 20.04 container
 ```
 
 Tests cover parser edge cases, and run every solver on random sparse and dense graphs,

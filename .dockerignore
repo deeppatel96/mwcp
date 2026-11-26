@@ -1,0 +1,17 @@
+# Keep the build context small and never ship host (macOS) build outputs into the image.
+.git
+**/.git
+.venv
+build
+bin
+results
+data
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.egg-info
+.DS_Store
+# KaMIS's mmwis (not built) and its nested submodule
+third_party/KaMIS/mmwis
+third_party/KaMIS/docs
+third_party/KaMIS/img

@@ -54,6 +54,9 @@ target_compile_options(pls PRIVATE ${THIRD_PARTY_WARN_OFF})
 include(ExternalProject)
 set(KAMIS_DIR ${CMAKE_SOURCE_DIR}/third_party/KaMIS)
 option(MWCP_WITH_KAMIS "Build the KaMIS weighted MIS solvers" ON)
+# KaMIS compiles with -march=native when the compiler supports it. Binaries then only run on CPUs
+# like the build machine's. MWCP_PORTABLE=ON pre-sets KaMIS's flag-check result to OFF.
+option(MWCP_PORTABLE "Don't tune for the build machine's CPU (no -march=native)" OFF)
 if(MWCP_WITH_KAMIS)
   if(NOT EXISTS ${KAMIS_DIR}/CMakeLists.txt)
     message(FATAL_ERROR "KaMIS submodule missing: run `git submodule update --init third_party/KaMIS`")
@@ -61,11 +64,15 @@ if(MWCP_WITH_KAMIS)
   set(KAMIS_BUILD ${CMAKE_BINARY_DIR}/kamis)
   # Use real OpenMP if the compiler has it; otherwise put a serial omp.h stub on the include path.
   find_package(OpenMP COMPONENTS CXX QUIET)
-  # (Passed as a standard include dir so CMake quotes it: the repo path may contain spaces.)
-  set(KAMIS_EXTRA_ARGS "")
+  if(MWCP_PORTABLE)
+    set(KAMIS_EXTRA_ARGS -DCOMPILER_SUPPORTS_MARCH_NATIVE=OFF)
+  else()
+    set(KAMIS_EXTRA_ARGS -UCOMPILER_SUPPORTS_MARCH_NATIVE)
+  endif()
   if(NOT OpenMP_CXX_FOUND)
     message(STATUS "KaMIS: no OpenMP runtime found, building serially with cmake/omp_stub")
-    set(KAMIS_EXTRA_ARGS "-DCMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES=${CMAKE_SOURCE_DIR}/cmake/omp_stub")
+    # Passed as a standard include dir so CMake quotes it: the repo path may contain spaces.
+    list(APPEND KAMIS_EXTRA_ARGS "-DCMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES=${CMAKE_SOURCE_DIR}/cmake/omp_stub")
   endif()
   ExternalProject_Add(kamis
     SOURCE_DIR ${KAMIS_DIR}
