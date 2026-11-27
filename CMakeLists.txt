@@ -26,6 +26,10 @@ target_compile_options(metis_io PRIVATE -Wall -Wextra)
 # Launcher that runs a solver and reports its own peak RSS (plain C: tiny, so it adds ~1 MiB at most).
 add_executable(mwcp_exec drivers/mwcp_exec.c)
 
+# Hypothesis coverage search (mwcp cover): real-valued weights, pool and exact modes.
+add_executable(mwcp_cover drivers/cover_main.cpp)
+target_link_libraries(mwcp_cover PRIVATE metis_io)
+
 add_executable(metis_tool drivers/metis_tool.cpp)
 target_link_libraries(metis_tool PRIVATE metis_io)
 

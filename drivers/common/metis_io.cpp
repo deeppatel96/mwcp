@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -17,7 +19,7 @@ static bool next_content_line(std::ifstream& in, std::string& line) {
     return false;
 }
 
-MetisGraph read_metis(const std::string& path) {
+MetisGraph read_metis(const std::string& path, bool real_weights) {
     std::ifstream in(path);
     if (!in) throw std::runtime_error("cannot open graph file: " + path);
 
@@ -44,6 +46,7 @@ MetisGraph read_metis(const std::string& path) {
     MetisGraph g;
     g.n = static_cast<int>(n);
     g.weight.assign(g.n, 1);
+    g.weight_real.assign(g.n, 1.0);
     g.adj.assign(g.n, {});
 
     long long self_loops = 0;
@@ -55,13 +58,28 @@ MetisGraph read_metis(const std::string& path) {
         long long x;
         if (has_vsize) ls >> x;
         if (has_vwgt) {
-            long long w = 0;
+            std::string tok, first;
             for (int c = 0; c < ncon; ++c) {
-                if (!(ls >> x)) throw std::runtime_error("missing weight on vertex line " + std::to_string(v + 1));
-                if (c == 0) w = x;
+                if (!(ls >> tok)) throw std::runtime_error("missing weight on vertex line " + std::to_string(v + 1));
+                if (c == 0) first = tok;
             }
-            if (w < 0 || w > INT_MAX) throw std::runtime_error("vertex weight out of int range on line " + std::to_string(v + 1));
-            g.weight[v] = static_cast<int>(w);
+            const std::string where = " on vertex line " + std::to_string(v + 1);
+            char* end = nullptr;
+            const double real = std::strtod(first.c_str(), &end);
+            if (end == first.c_str() || *end != '\0' || !std::isfinite(real))
+                throw std::runtime_error("bad vertex weight '" + first + "'" + where);
+            g.weight_real[v] = real;
+            const long long w = std::strtoll(first.c_str(), &end, 10);
+            const bool is_int = *end == '\0' && w >= 0 && w <= INT_MAX;
+            if (is_int) {
+                g.weight[v] = static_cast<int>(w);
+            } else if (real_weights) {
+                g.weight[v] = 0;
+            } else {
+                throw std::runtime_error("vertex weight " + first + where + ": the solvers need integer weights "
+                                         "in [0, " + std::to_string(INT_MAX) + "]; real-valued (e.g. log-likelihood) "
+                                         "weights are supported by `mwcp cover`");
+            }
         }
         long long u;
         while (ls >> u) {

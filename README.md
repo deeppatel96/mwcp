@@ -183,6 +183,44 @@ highlighted:
   `neato -n2` (installed in the Docker image), so it has the same layout as the HTML. Other Graphviz engines (e.g. `sfdp`) ignore the pinned positions and
   lay the graph out themselves.
 
+### Hypothesis coverage: `mwcp cover`
+
+```sh
+mwcp cover g.graph                        # fast pool search: heavy hypotheses up to ~99%, no guarantee
+mwcp cover g.graph --exact -t 30          # proven: stops once 99% coverage is proven (or at -t)
+mwcp cover g.graph --exact -k 10          # the 10 heaviest hypotheses, proven top-10
+mwcp cover g.graph --coverage 0.95 --json out.json --draw hyps.html
+```
+
+**Model.** Vertex weights are natural-log scores, e.g. log-likelihood ratios against a
+false-alarm baseline. They may be real numbers and negative: the METIS layout is unchanged, only
+the weight token may be a decimal (`12.734 5 9 17`). Every clique, including the empty one and
+subsets of other cliques, is a hypothesis, and P(C) is proportional to exp(w(C)). mwcp needs no
+scale and knows nothing about what the vertices mean. `solve` and `batch` still need integer
+weights and reject decimals with a clear error.
+
+**Modes.**
+- **pool (default)** is a randomized search: perturb the weights with logistic noise, grow a clique
+  greedily, then add one-vertex extensions and all heavy subsets of each clique found. It stops when
+  new hypotheses stop adding mass, or at `-t`. It reports the share of the *found* mass the returned
+  set holds, which is an estimate and an overestimate, and a proven but loose floor from a global
+  coloring bound.
+- **exact (`--exact`)** seeds with the pool, then runs a best-first branch and bound over the clique
+  tree. Each unexplored subtree's mass is bounded by a greedy coloring:
+  e^w(C) · Π_sets (1 + Σ e^w). It stops when the unexplored mass is provably ≤ 1 − coverage.
+  Whatever stops it (`-t`, `--max-memory-mb`), it reports the coverage proven for the returned set.
+  `guaranteed: true` in the JSON, and exit code 0, mean the request was met with proof; exit code 3
+  means it ran but couldn't prove it.
+- **Per hypothesis:** `p_low` = e^w / (upper bound on the total mass) is a proven lower bound on its
+  probability, and `p_high` = e^w / (mass found) is an upper bound.
+
+**Weak tracks make the 99% set explode.** A vertex whose weight is within a few nats of 0 is about
+as likely absent as present, so every hypothesis has a near-twin with it flipped. Each such vertex
+roughly doubles the number of hypotheses needed for a given coverage, whatever the algorithm. In
+testing, a 60-vertex MHT-like graph with 10 such tracks needed over a million hypotheses for 99%,
+and its best hypothesis held at most 0.3%. Graphs where the probability is concentrated are fast:
+99% proven with 1,437 hypotheses in 0.03 s on a 120-vertex graph.
+
 ### Input format
 
 METIS as KaMIS uses it:

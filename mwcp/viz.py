@@ -190,6 +190,7 @@ CSS = """
 #g{--sel:var(--sl)}
 #g line{stroke:var(--text2);stroke-width:.6;stroke-opacity:var(--eo)}
 #g line.in{stroke:var(--sel);stroke-width:2.2;stroke-opacity:1}
+#g.big line.in{stroke-width:.8;stroke-opacity:.45}
 #g circle{fill:var(--node);stroke:var(--surface);stroke-width:1.5}
 #g circle.in{fill:var(--sel)}
 #g circle.best{stroke:var(--text);stroke-width:2;stroke-dasharray:3 2}
@@ -215,7 +216,7 @@ for(let v=0;v<N;v++){
   const g=mk('g',{class:'mark',tabindex:'0'});
   const inC=Object.keys(D.c).filter(s=>D.cs[s].has(v));
   g.dataset.tip=`vertex ${D.id[v]} (METIS line ${D.id[v]+1})\nweight ${D.w[v]}\n`+
-    (inC.length?`in the clique of: ${inC.join(', ')}`:
+    (inC.length?`in ${D.noun}: ${inC.join(', ')}`:
       `adjacent to ${D.h[v]} of the ${D.k} best-clique vertices`);
   g.setAttribute('aria-label',`vertex ${D.id[v]}, weight ${D.w[v]}`);
   const c=mk('circle',{cx:px(v).toFixed(1),cy:py(v).toFixed(1),r:rad(v).toFixed(1)});
@@ -228,7 +229,8 @@ function pick(sol){
   lines.forEach((l,i)=>{const [a,b]=adj[i];l.classList.toggle('in',C.has(a)&&C.has(b));});
   gE.append(...lines.filter(l=>l.classList.contains('in')));       // clique edges on top
   gL.textContent='';
-  if(C.size<=40) C.forEach(v=>{gL.append(Object.assign(mk('text',{x:(px(v)+rad(v)+3).toFixed(1),y:(py(v)+4).toFixed(1)}),{textContent:D.w[v]}));});
+  svg.classList.toggle('big',C.size>15);                    // many clique edges: draw them lighter
+  if(C.size<=20) C.forEach(v=>{gL.append(Object.assign(mk('text',{x:(px(v)+rad(v)+3).toFixed(1),y:(py(v)+4).toFixed(1)}),{textContent:D.w[v]}));});
   document.querySelectorAll('.pick').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===sol));
   document.getElementById('bestnote').style.display=sol===D.best?'none':'';}
 document.querySelectorAll('.pick').forEach(b=>b.addEventListener('click',()=>pick(b.dataset.s)));
@@ -240,10 +242,24 @@ def _e(s) -> str:
     return html.escape(str(s), quote=True)
 
 
-def render_html(view: View, title: str, subtitle: str = "") -> str:
+def _fw(w) -> str:
+    return f"{w:,}" if isinstance(w, int) else f"{w:,.3f}"
+
+
+def _colors_for(view: View, hypotheses: bool) -> Dict[str, Tuple[str, str]]:
+    """Solvers keep their report colors; ranked hypotheses all use the first slot (one is shown at a time)."""
+    names = list(view.cliques)
+    if hypotheses:
+        from .style import PALETTE
+        return {s: PALETTE[0] for s in names}
+    return solver_colors(names)
+
+
+def render_html(view: View, title: str, subtitle: str = "", hypotheses: bool = False) -> str:
     solvers = list(view.cliques)
-    colors = solver_colors(solvers)
-    data = {"w": view.weights, "id": view.vertices, "e": view.edges, "c": view.cliques,
+    colors = _colors_for(view, hypotheses)
+    noun = "hypotheses" if hypotheses else "the clique of"
+    data = {"noun": noun, "w": [round(w, 4) if isinstance(w, float) else w for w in view.weights], "id": view.vertices, "e": view.edges, "c": view.cliques,
             "col": colors, "best": view.best, "p": view.pos, "W": view.width, "H": view.height,
             "h": view.hits, "k": len(view.cliques[view.best])}
     what = "complement of the input file" if view.complemented else "input graph"
@@ -268,17 +284,18 @@ def render_html(view: View, title: str, subtitle: str = "") -> str:
                ("<span class=\"tag\">proved optimal</span>" if i["proved_optimal"] else "")
         buttons.append(f'<button class="pick" data-s="{_e(s)}" aria-pressed="false" '
                        f'style="--c:{colors[s][0]};--cd:{colors[s][1]}"><i></i>{_e(s)} '
-                       f'<small>weight {i["weight"]:,} · {i["size"]} vertices</small>{tags}</button>')
-    head.append(f'<div class="picks" role="group" aria-label="Show the clique of">{"".join(buttons)}</div>')
-    head.append(f'<p class="note" id="bestnote">Dashed outline: vertices of the best clique '
-                f'({_e(view.best)}) that this clique misses.</p>')
+                       f'<small>weight {_fw(i["weight"])} · {i["size"]} vertices</small>{tags}</button>')
+    head.append(f'<div class="picks" role="group" aria-label="Show">{"".join(buttons)}</div>')
+    head.append(f'<p class="note" id="bestnote">Dashed outline: vertices of the best '
+                f'{"hypothesis" if hypotheses else "clique"} ({_e(view.best)}) that this one misses.</p>')
     rows = "".join(
-        f"<tr><td>{_e(s)}</td><td>{view.info[s]['weight']:,}</td><td>{view.info[s]['size']}</td>"
+        f"<tr><td>{_e(s)}</td><td>{_fw(view.info[s]['weight'])}</td><td>{view.info[s]['size']}</td>"
         f"<td>{'yes' if view.info[s]['proved_optimal'] else ''}</td>"
         f"<td class=\"ids\">{_e(', '.join(str(view.vertices[v]) for v in sorted(view.cliques[s], key=lambda v: view.vertices[v])))}</td></tr>"
         for s in solvers)
-    table = ("<details><summary>Table: each solver's clique (0-based vertex ids)</summary><table><thead><tr>"
-             "<th>solver</th><th>weight</th><th>size</th><th>optimal</th><th>vertices</th></tr></thead>"
+    table = (f"<details><summary>Table: each {'hypothesis' if hypotheses else 'solver' + chr(39) + 's clique'} "
+             "(0-based vertex ids)</summary><table><thead><tr>"
+             f"<th>{'hypothesis' if hypotheses else 'solver'}</th><th>weight</th><th>size</th><th>optimal</th><th>vertices</th></tr></thead>"
              f"<tbody>{rows}</tbody></table></details>")
     body = ("".join(head) + '<svg id="g" role="img" aria-label="Graph with the selected clique highlighted"></svg>'
             + table + f'<script type="application/json" id="data">{json.dumps(data, separators=(",", ":"))}</script>')
@@ -287,10 +304,10 @@ def render_html(view: View, title: str, subtitle: str = "") -> str:
 
 # ---------------------------------------------------------------------------- DOT
 
-def render_dot(view: View, solver: Optional[str] = None) -> str:
+def render_dot(view: View, solver: Optional[str] = None, hypotheses: bool = False) -> str:
     """The same view as DOT, with `solver`'s clique (default: the best) filled in its color."""
     solver = solver or view.best
-    color = solver_colors(list(view.cliques))[solver][0]
+    color = _colors_for(view, hypotheses)[solver][0]
     clique = set(view.cliques[solver])
     wmax = max(view.weights) or 1
     small = len(view.vertices) <= 60
@@ -312,7 +329,7 @@ def render_dot(view: View, solver: Optional[str] = None) -> str:
         attrs = [f"width={diameter / 72:.3f}", f'pos="{x:.1f},{view.height - y:.1f}"',
                  f'tooltip="vertex {v}, weight {w}"', f'label="{v}"' if small else 'label=""']
         if i in clique:
-            attrs += [f'fillcolor="{color}"', f'xlabel="{w}"']
+            attrs += [f'fillcolor="{color}"', f'xlabel="{_fw(w)}"']
         out.append(f"  v{v} [{', '.join(attrs)}];")
     inside = [(a, b) for a, b in view.edges if a in clique and b in clique]
     for a, b in view.edges:
@@ -345,7 +362,7 @@ def render_svg(dot_path: Path, svg_path: Path, n_vertices: int,
 
 def write_clique_view(graph: Graph, results: Sequence[dict], path: Path, title: str, subtitle: str = "",
                       max_vertices: int = MAX_VERTICES, max_edges: int = MAX_EDGES,
-                      log: Callable[[str], None] = lambda m: None) -> List[Path]:
+                      log: Callable[[str], None] = lambda m: None, hypotheses: bool = False) -> List[Path]:
     """Write PATH (.html), PATH.dot and, with Graphviz, PATH.svg. Returns the files written."""
     view = build_view(graph, results, max_vertices, max_edges)
     path = Path(path)
@@ -353,8 +370,8 @@ def write_clique_view(graph: Graph, results: Sequence[dict], path: Path, title: 
         path = path.with_suffix(".html")
     path.parent.mkdir(parents=True, exist_ok=True)
     dot, svg = path.with_suffix(".dot"), path.with_suffix(".svg")
-    path.write_text(render_html(view, title, subtitle))
-    dot.write_text(render_dot(view))
+    path.write_text(render_html(view, title, subtitle, hypotheses))
+    dot.write_text(render_dot(view, hypotheses=hypotheses))
     written = [path, dot]
     if render_svg(dot, svg, len(view.vertices), log):
         written.append(svg)

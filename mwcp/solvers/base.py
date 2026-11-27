@@ -37,6 +37,43 @@ def read_peak_rss_mb(path: Path) -> Optional[float]:
 
 
 @dataclass
+class Run:
+    out: str
+    err: str
+    returncode: Optional[int]
+    wall_time: float
+    peak_rss_mb: Optional[float]
+    timed_out: bool
+
+
+def run_measured(cmd: Sequence[str], hard_timeout: float, workdir: Path) -> Run:
+    """Run `cmd` through bin/mwcp_exec, which records its peak RSS; kill it after `hard_timeout`.
+
+    The command gets its own session, so a timeout kill takes down its whole process group.
+    """
+    rss_file = workdir / _RSS_FILE
+    full = [str(BIN_DIR / LAUNCHER), str(rss_file)] + list(cmd)
+    t0 = time.monotonic()
+    proc = subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=hard_timeout)
+    except subprocess.TimeoutExpired:
+        proc.send_signal(signal.SIGTERM)  # the launcher kills the program, reaps it, writes its RSS
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # anything left in the group
+        except ProcessLookupError:
+            pass
+        out, err = proc.communicate()
+        return Run(out, err, None, time.monotonic() - t0, read_peak_rss_mb(rss_file), True)
+    return Run(out, err, proc.returncode, time.monotonic() - t0, read_peak_rss_mb(rss_file), False)
+
+
+@dataclass
 class RunContext:
     workdir: Path        # private temp dir for this solver run (e.g. output files)
     timeout: float
@@ -82,42 +119,18 @@ class Solver(ABC):
             except PrepError as e:
                 res.message = str(e)
                 return res
-            # Run through the launcher when it is built, so the solver's peak memory is measured.
-            launcher = BIN_DIR / LAUNCHER
-            measured = launcher.is_file() and os.access(launcher, os.X_OK)
-            rss_file = workdir / _RSS_FILE
-            if measured:
-                cmd = [str(launcher), str(rss_file)] + list(cmd)
-            t0 = time.monotonic()
-            # New session so a timeout kill takes down the solver's whole process group.
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, start_new_session=True)
-            try:
-                out, err = proc.communicate(timeout=timeout + grace_seconds(timeout))
-            except subprocess.TimeoutExpired:
-                if measured:  # the launcher kills the solver, reaps it and writes its peak RSS
-                    proc.send_signal(signal.SIGTERM)
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        pass
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)  # anything left in the group
-                except ProcessLookupError:
-                    pass
-                proc.communicate()
+            run = run_measured(cmd, timeout + grace_seconds(timeout), workdir)
+            res.wall_time, res.peak_rss_mb = run.wall_time, run.peak_rss_mb
+            if run.timed_out:
                 res.status = Status.TIMEOUT
-                res.wall_time = time.monotonic() - t0
-                res.peak_rss_mb = read_peak_rss_mb(rss_file) if measured else None
                 res.message = f"killed after {timeout + grace_seconds(timeout):.1f}s wall time"
                 return res
-            res.wall_time = time.monotonic() - t0
-            res.peak_rss_mb = read_peak_rss_mb(rss_file) if measured else None
-            res.returncode = proc.returncode
+            res.returncode = run.returncode
+            out, err = run.out, run.err
 
-            if proc.returncode != 0:
+            if run.returncode != 0:
                 tail = (err or out).strip().splitlines()[-3:]
-                res.message = f"exit code {proc.returncode}: " + " | ".join(tail)
+                res.message = f"exit code {run.returncode}: " + " | ".join(tail)
                 return res
             try:
                 weight, clique, optimal, stime = self.parse(out, RunContext(workdir, timeout, res.wall_time))

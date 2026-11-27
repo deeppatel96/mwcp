@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
-from .graph import Graph, read_metis
+from .graph import Graph, GraphFormatError, read_metis
 from .instance import Instance
 from .result import SolverResult, Status
 from .solvers import Solver
@@ -45,6 +45,9 @@ def solve_graph(graph_path: Path, solvers: Sequence[Solver], *, timeout: float, 
     if graph is None:
         graph = read_metis(graph_path, complement=complement)
     parse_s = time.monotonic() - t0
+    if not graph.solver_weights_ok:
+        raise GraphFormatError("the solvers need non-negative integer weights; real-valued or negative "
+                               "(e.g. log-likelihood) weights are supported by `mwcp cover`")
     what = "complement of input" if complement else "input as given"
     log(f"graph {graph_path.name}: n={graph.n}, file m={graph.file_edges}; solving MWC on {what} "
         f"(m={graph.m}); parsed in {parse_s:.2f}s")

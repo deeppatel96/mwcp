@@ -18,7 +18,7 @@ class Graph:
     is the complement (same vertices and weights), but it's never built: edge queries invert.
     """
     n: int
-    weights: List[int]
+    weights: List  # int, or float for real-valued (e.g. log-likelihood) weights
     adj: List[Set[int]] = field(repr=False)  # 0-based neighbor sets, as in the file
     complemented: bool = False
 
@@ -51,8 +51,24 @@ class Graph:
                     return f"vertices {u} and {v} are not adjacent"
         return None
 
-    def weight_of(self, vertices: Iterable[int]) -> int:
+    def weight_of(self, vertices: Iterable[int]):
         return sum(self.weights[v] for v in vertices)
+
+    @property
+    def solver_weights_ok(self) -> bool:
+        """True if every weight is a non-negative int, which the solvers require."""
+        return all(isinstance(w, int) and w >= 0 for w in self.weights)
+
+
+def parse_weight(tok: str):
+    """A vertex weight: int when the token is an integer, else float (e.g. a log-likelihood)."""
+    try:
+        return int(tok)
+    except ValueError:
+        w = float(tok)
+        if w != w or w in (float("inf"), float("-inf")):
+            raise ValueError(f"bad weight {tok}")
+        return w
 
 
 def _content_lines(path: Path):
@@ -98,7 +114,10 @@ def read_metis(path: str | Path, complement: bool = False) -> Graph:
         if has_vwgt:
             if len(toks) < pos + ncon:
                 raise GraphFormatError(f"missing weight on vertex line {v + 1}")
-            weights[v] = int(toks[pos])
+            try:
+                weights[v] = parse_weight(toks[pos])
+            except ValueError as e:
+                raise GraphFormatError(f"bad weight '{toks[pos]}' on vertex line {v + 1}") from e
             pos += ncon
         step = 2 if has_ewgt else 1
         for t in toks[pos::step]:

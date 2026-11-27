@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List
 
 from . import BIN_DIR, REPO_ROOT, __version__
-from .graph import GraphFormatError, write_kamis_solution
+from .graph import GraphFormatError, read_metis, write_kamis_solution
 from .instance import PrepError
 from .runner import solve_graph
 from .result import SolverResult, Status
@@ -28,13 +28,13 @@ def _cmd_build(args) -> int:
         if subprocess.call(cmd) != 0:
             return 1
     missing = [s.binary for s in REGISTRY.values() if not s.available()]
-    for tool in ("metis_tool", "mwcp_exec"):
+    for tool in ("metis_tool", "mwcp_exec", "mwcp_cover"):
         if not (BIN_DIR / tool).is_file():
             missing.append(tool)
     if missing:
         print(f"error: missing binaries in {BIN_DIR}: {', '.join(missing)}", file=sys.stderr)
         return 1
-    print(f"built: {', '.join(s.binary for s in REGISTRY.values())}, metis_tool, mwcp_exec -> {BIN_DIR}")
+    print(f"built: {', '.join(s.binary for s in REGISTRY.values())}, metis_tool, mwcp_exec, mwcp_cover -> {BIN_DIR}")
     return 0
 
 
@@ -214,6 +214,45 @@ def _cmd_draw(args) -> int:
     return status
 
 
+def _cmd_cover(args) -> int:
+    from .cover import CoverError, format_table, run_cover
+    graph_path = Path(args.graph)
+    try:
+        graph = read_metis(graph_path, complement=args.complement)
+    except (OSError, GraphFormatError, ValueError) as e:
+        print(f"error: cannot read {graph_path}: {e}", file=sys.stderr)
+        return 2
+    try:
+        res = run_cover(graph_path, mode="exact" if args.exact else "pool", coverage=args.coverage, k=args.k,
+                        time_limit=args.timeout, seed_time=args.seed_time, max_hypotheses=args.max_hypotheses,
+                        seed=args.seed, complement=args.complement, max_memory_mb=args.max_memory_mb, graph=graph)
+    except CoverError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(format_table(res))
+    if args.json:
+        payload = {"graph": str(graph_path), "n": graph.n, "m": graph.m, "complement": args.complement,
+                   **res.to_dict()}
+        text = json.dumps(payload, indent=2)
+        if args.json == "-":
+            print(text)
+        else:
+            Path(args.json).write_text(text + "\n")
+    if args.draw:
+        from .viz import write_clique_view
+        top = [{"solver": f"#{h.rank}", "status": "ok", "weight": h.weight, "clique": h.vertices}
+               for h in res.hypotheses[:args.draw_top] if h.vertices]
+        if top:
+            files = write_clique_view(graph, top, Path(args.draw), title=f"Hypotheses: {graph_path.name}",
+                                      subtitle=f"top {len(top)} of {len(res.hypotheses)}",
+                                      max_vertices=args.max_vertices, max_edges=args.max_edges,
+                                      log=_logger(False), hypotheses=True)
+            print(f"hypothesis view: {', '.join(str(f) for f in files)}", file=sys.stderr)
+    if args.exact and not res.guaranteed:
+        return 3   # ran, but the requested coverage / top-K was not proven
+    return 0
+
+
 def _add_draw_limits(s: argparse.ArgumentParser) -> None:
     s.add_argument("--max-vertices", type=int, default=300, metavar="N",
                    help="clique view: draw the whole graph up to N vertices, else a reduced view (default 300)")
@@ -278,6 +317,31 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--graphs", metavar="NAMES", help="comma list of graph names to include (default: all)")
     pl.add_argument("--title", default="Solver performance", help="report title")
     pl.set_defaults(func=_cmd_plot)
+
+    c = sub.add_parser("cover", help="the heaviest hypotheses (cliques) up to a probability coverage; "
+                                     "weights are natural-log scores, P(clique) ~ exp(weight)")
+    c.add_argument("graph", help="METIS graph; vertex weights may be real numbers (e.g. log-likelihood ratios)")
+    c.add_argument("--exact", action="store_true",
+                   help="prove the coverage (branch and bound); default: fast pool search, no guarantee")
+    grp = c.add_mutually_exclusive_group()
+    grp.add_argument("--coverage", type=float, default=0.99,
+                     help="return hypotheses until they hold this share of the probability (default 0.99)")
+    grp.add_argument("-k", type=int, default=0, metavar="K", help="return the K heaviest hypotheses instead")
+    c.add_argument("-t", "--timeout", type=float, default=10.0, help="time budget in seconds (default 10)")
+    c.add_argument("--seed-time", type=float, metavar="S",
+                   help="exact mode: seconds of pool search before branch and bound (default 10%% of -t)")
+    c.add_argument("--max-hypotheses", type=int, default=10000, metavar="N",
+                   help="return at most N hypotheses (default 10000)")
+    c.add_argument("--max-memory-mb", type=float, default=2048, metavar="MB",
+                   help="exact mode: stop when the search frontier needs more memory (default 2048)")
+    c.add_argument("--seed", type=int, default=0, help="random seed for the pool search")
+    c.add_argument("-c", "--complement", action="store_true",
+                   help="the input is the complement: hypotheses are cliques of its complement")
+    c.add_argument("--json", metavar="PATH", help="write the result as JSON ('-' for stdout)")
+    c.add_argument("--draw", metavar="PATH", help="write a hypothesis view (.html/.dot/.svg) of the top hypotheses")
+    c.add_argument("--draw-top", type=int, default=20, metavar="N", help="hypotheses in the view (default 20)")
+    _add_draw_limits(c)
+    c.set_defaults(func=_cmd_cover)
 
     d = sub.add_parser("draw", help="draw the graph with each solver's clique highlighted, from saved results")
     d.add_argument("results", help="batch output dir, its results.jsonl, or a `mwcp solve --json` file")

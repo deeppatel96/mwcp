@@ -133,6 +133,9 @@ def run_batch(args, log: Callable[[str], None]) -> int:
             continue
         try:
             graph = read_metis(gpath, complement=args.complement)
+            if not graph.solver_weights_ok:
+                raise GraphFormatError("the solvers need non-negative integer weights; real-valued or "
+                                       "negative weights are supported by `mwcp cover`")
         except (OSError, GraphFormatError, ValueError) as e:
             log(f"[error] {gpath.name}: cannot read: {e}")
             failures += 1
