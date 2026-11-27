@@ -95,3 +95,16 @@ if(MWCP_WITH_KAMIS)
     BUILD_ALWAYS ON
     USES_TERMINAL_BUILD ON)
 endif()
+
+# ---------------------------------------------------------------- install (`cmake --install` / `make install`)
+# The binaries are internal helpers of the mwcp Python package, so they go to
+# <prefix>/libexec/mwcp rather than <prefix>/bin (generic names like `pls` would clutter PATH).
+# The package finds them in <repo>/bin, or wherever MWCP_BIN_DIR points (e.g. <prefix>/libexec/mwcp).
+include(GNUInstallDirs)
+set(MWCP_INSTALL_BINDIR "${CMAKE_INSTALL_LIBEXECDIR}/mwcp" CACHE STRING "Install directory for the mwcp binaries")
+install(TARGETS mwcp_exec mwcp_cover metis_tool wlmc_cli fastwclq_cli pls
+        RUNTIME DESTINATION ${MWCP_INSTALL_BINDIR})
+if(MWCP_WITH_KAMIS)
+  install(PROGRAMS ${CMAKE_SOURCE_DIR}/bin/kamis_branch_reduce ${CMAKE_SOURCE_DIR}/bin/kamis_weighted_ls
+          DESTINATION ${MWCP_INSTALL_BINDIR})
+endif()
