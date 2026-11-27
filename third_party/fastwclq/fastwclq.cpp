@@ -334,6 +334,10 @@ void output_best_solution() {
 	
 }
 
+/* MWCP-WRAPPER: called with the new best weight on every improvement (quality over time) */
+static void (*mwcp_improve_cb)(long) = nullptr;
+void fastwclq_set_improve_callback(void (*cb)(long)) { mwcp_improve_cb = cb; }
+
 void update_best_solution() {
 	best_solution.clear();
 	for (auto v : solution) {
@@ -790,6 +794,7 @@ int fastwclq(int vertex_count, int nb_edge, double cutoff_time, int** AdjacentLi
 			
 			update_best_solution();
 			best_solution_weight=solution_weight;
+			if (mwcp_improve_cb) mwcp_improve_cb(best_solution_weight); /* MWCP-WRAPPER */
 			best_solution_time = (double) ( clock() - start) / CLOCKS_PER_SEC;
 			best_solution_try = tries;
 			

@@ -17,6 +17,12 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <math.h>
+
+/* MWCP-WRAPPER: called with MAX_CLQ_WEIGHT whenever the incumbent changes (the driver keeps the
+   increases and time-stamps them), so one run gives the solution quality over time. */
+static void (*MWCP_IMPROVE_CB)(int) = NULL;
+void wlmc_set_improve_callback(void (*cb)(int)) { MWCP_IMPROVE_CB = cb; }
+#define MWCP_REPORT() do { if (MWCP_IMPROVE_CB) MWCP_IMPROVE_CB(MAX_CLQ_WEIGHT); } while (0)
 #include <assert.h>
 #define WORD_LENGTH 100
 #define TRUE 1
@@ -1095,6 +1101,7 @@ static int sort_by_weight_degeneracy_and_core_decomposion() {
 	if (INIT_CLQ_WEIGHT == K_CORE_G) {
 		MAX_CLQ_SIZE = INIT_CLQ_SIZE;
 		MAX_CLQ_WEIGHT = INIT_CLQ_WEIGHT;
+		MWCP_REPORT(); /* MWCP-WRAPPER */
 		INIT_TIME = get_utime() - READ_TIME;
 		SEARCH_TIME = 0;
 		printf("I Finding the optimal solution in initial phase!\n");
@@ -3213,6 +3220,7 @@ static void store_maximal_weighted_clique() {
 	MAX_CLQ_SIZE = CUR_CLQ_SIZE + 1;
 
 	MAX_CLQ_WEIGHT = CUR_CLQ_WEIGHT + CUR_NODE_WEIGHT;
+	MWCP_REPORT(); /* MWCP-WRAPPER */
 
 	printf("C %8d |%8d |%8d %10d %10d %10d|%10d %10.2lf \n",
 			Cursor_Stack[0] + 1, MAX_CLQ_WEIGHT, cut_ver, cut_inc, cut_iset,
@@ -3314,6 +3322,7 @@ static void store_maximal_weighted_clique2() {
 	MAX_CLQ_SIZE = CUR_CLQ_SIZE;
 
 	MAX_CLQ_WEIGHT = MAX_CLQ_WEIGHT + CUR_NODE_WEIGHT;
+	MWCP_REPORT(); /* MWCP-WRAPPER */
 
 	printf("C %8d |%8d |%8d %10d %10d %10d|%10d \n", Cursor_Stack[0] + 1,
 			MAX_CLQ_WEIGHT, cut_ver, cut_inc, cut_iset, cut_satz,
@@ -4047,6 +4056,7 @@ static void init_for_search() {
 		//		}
 		MAX_CLQ_SIZE = INIT_CLQ_SIZE;
 		MAX_CLQ_WEIGHT = INIT_CLQ_WEIGHT;
+		MWCP_REPORT(); /* MWCP-WRAPPER */
 	}
 	push(NB_NODE, Cursor_Stack);
 }

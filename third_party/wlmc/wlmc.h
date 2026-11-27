@@ -10,5 +10,7 @@ int wlmc_clique_size(void);
 int wlmc_get_clique(int *out);
 int wlmc_timed_out(void);
 int wlmc_max_nodes(void);
+/* MWCP-WRAPPER: cb(weight) on every incumbent change */
+void wlmc_set_improve_callback(void (*cb)(int));
 
 #endif

@@ -9,7 +9,10 @@ extern "C" {
 #include "wlmc.h"
 }
 
+static void on_improve(int w) { report_improvement(w); }
+
 int main(int argc, char** argv) {
+    start_clock();
     if (argc < 2) {
         std::cerr << "usage: " << argv[0] << " <graph.metis> [cutoff_seconds=1000]\n";
         return 2;
@@ -23,6 +26,7 @@ int main(int argc, char** argv) {
         }
         if (g.n == 0) { print_result(0, {}, 0.0, true); return 0; }
         SolverArrays a = to_solver_arrays(g);
+        wlmc_set_improve_callback(on_improve);
         auto t0 = std::chrono::steady_clock::now();
         int w = wlmc(g.n, (int)g.m, cutoff, a.adj_ptr.data(), a.degree.data(), a.weight.data(), a.bound.data());
         double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();

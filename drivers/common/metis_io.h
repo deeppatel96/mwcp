@@ -27,5 +27,11 @@ struct SolverArrays {
 };
 SolverArrays to_solver_arrays(const MetisGraph& g);
 
+// Quality over time: report_improvement(w) prints "IMPROVE <seconds> <weight>" (stdout, flushed)
+// when w beats every weight reported before; seconds count from start_clock(), called first
+// thing in main(), so they include reading the graph.
+void start_clock();
+void report_improvement(long long weight);
+
 // Prints the machine-readable block parsed by the Python wrapper.
 void print_result(long long weight, const std::vector<int>& clique, double seconds, bool optimal);

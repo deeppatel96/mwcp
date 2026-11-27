@@ -122,6 +122,29 @@ Each result is **verified** against the input: the vertices must form a clique, 
 must add up to the reported weight. A result that fails gets status `invalid`. Other statuses are
 `timeout` (killed by the wrapper after timeout + max(10 s, 50%) grace), `error` and `unavailable`.
 
+### Quality over time: `--checkpoints`
+
+```sh
+mwcp batch graphs/ -t 60 -o results/run1 --checkpoints 5,10,20,30,60 --plot
+```
+
+WLMC and FastWClq report every improvement of their best clique while they run, as
+`IMPROVE <seconds> <weight>` lines. mwcp stores these as `trace` in `results.jsonl` and the
+`--json` output. So **one run with a 60 s limit shows what each solver had found by 5, 10, 20 or
+30 s**, with no separate run per limit.
+
+- **`checkpoints.csv`:** one row per (graph, seed, solver, time). It has the best weight by then,
+  the gap to the best weight any solver found on that graph (absolute and relative), and whether
+  optimality had been proved by then.
+- **The report** gets a "Quality over time" section: the mean gap per solver over time (log time
+  axis, hover for values) and a table at the checkpoints.
+- **Solvers without a trace** (OpenPLS, KaMIS) appear only once finished, and at the last
+  checkpoint (the time limit) every solver's final answer counts.
+- **Times** are seconds since the solver process started, including reading the graph. A separate
+  run with a shorter limit stops on the solver's own clock, which excludes reading the graph, so it
+  can only match or slightly beat the trace at that time. The search follows the same path either
+  way: a test checks that a short run's improvements are exactly the start of a long run's.
+
 ### Performance reports: `mwcp plot`
 
 ```sh

@@ -7,5 +7,7 @@ int fastwclq(int NB_Node, int NB_EDGE, double cutoff, int** AdjacentList, int* N
 int fastwclq_clique_size();
 int fastwclq_get_clique(int *out);
 int fastwclq_proved_optimal();
+/* MWCP-WRAPPER: cb(weight) on every improvement */
+void fastwclq_set_improve_callback(void (*cb)(long));
 
 #endif

@@ -7,7 +7,10 @@
 #include "common/metis_io.h"
 #include "fastwclq.h"
 
+static void on_improve(long w) { report_improvement(w); }
+
 int main(int argc, char** argv) {
+    start_clock();
     if (argc < 2) {
         std::cerr << "usage: " << argv[0] << " <graph.metis> [cutoff_seconds=1000] [seed=0]\n";
         return 2;
@@ -18,6 +21,7 @@ int main(int argc, char** argv) {
         MetisGraph g = read_metis(argv[1]);
         if (g.n == 0) { print_result(0, {}, 0.0, true); return 0; }
         SolverArrays a = to_solver_arrays(g);
+        fastwclq_set_improve_callback(on_improve);
         std::srand(seed);  // fastwclq() draws its internal seed from rand()
         auto t0 = std::chrono::steady_clock::now();
         int w = fastwclq(g.n, (int)g.m, cutoff, a.adj_ptr.data(), a.degree.data(), a.weight.data(), a.bound.data());

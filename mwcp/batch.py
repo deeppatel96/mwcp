@@ -5,6 +5,7 @@ Output directory layout:
   summary.csv     the same rows without cliques, rewritten at the end of every batch
   runs.jsonl      one line per batch invocation: settings, versions, host
   solutions/      KaMIS-style 0/1 files, with --solutions
+  checkpoints.csv quality at given times (from improvement traces), with --checkpoints
   report.html     solver performance report (wall time, peak memory), with --plot
   cliques/        clique views per graph and seed (.html, .dot, .svg), with --draw
 """
@@ -31,6 +32,13 @@ GRAPH_SUFFIXES = (".graph", ".metis")
 CSV_FIELDS = ["graph_name", "graph", "n", "file_edges", "m", "complement", "seed", "timeout", "solver",
               "status", "weight", "size", "proved_optimal", "best_weight", "is_best", "gap",
               "solver_time", "wall_time", "peak_rss_mb", "parse_time", "message"]
+
+
+def parse_checkpoints(spec: str) -> List[float]:
+    pts = sorted({float(x) for x in str(spec).split(",") if x.strip()})
+    if not pts or pts[0] <= 0:
+        raise ValueError("--checkpoints needs positive seconds, e.g. 5,10,30,60")
+    return pts
 
 
 def collect_graphs(inputs: Iterable[str]) -> List[Path]:
@@ -92,6 +100,8 @@ def write_summary(results_path: Path, csv_path: Path) -> int:
 
 def run_batch(args, log: Callable[[str], None]) -> int:
     try:
+        if args.checkpoints:
+            parse_checkpoints(args.checkpoints)
         solvers = get_solvers(args.solvers)
         seeds = [int(x) for x in str(args.seeds).split(",") if x.strip()]
         graphs = collect_graphs(args.inputs)
@@ -165,6 +175,7 @@ def run_batch(args, log: Callable[[str], None]) -> int:
                     "is_best": r.status == Status.OK and r.weight == best_w,
                     "gap": (best_w - r.weight) if (best_w is not None and r.status == Status.OK) else None,
                     "solver_time": r.solver_time, "wall_time": r.wall_time, "peak_rss_mb": r.peak_rss_mb,
+                    "trace": [list(p) for p in r.trace],
                     "parse_time": round(o.parse_seconds, 4), "message": r.message,
                     "clique": r.clique if r.status == Status.OK else None,
                 })
@@ -189,10 +200,19 @@ def run_batch(args, log: Callable[[str], None]) -> int:
 
     n_rows = write_summary(results_path, csv_path) if results_path.exists() else 0
     log(f"done: {n_rows} result rows in {results_path} and {csv_path}")
+    checkpoints = parse_checkpoints(args.checkpoints) if args.checkpoints else None
+    if checkpoints and n_rows:
+        from .plot import load_rows
+        from .quality import CHECKPOINT_FIELDS, checkpoint_rows
+        with open(out / "checkpoints.csv", "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=CHECKPOINT_FIELDS)
+            w.writeheader()
+            w.writerows(checkpoint_rows(load_rows(results_path), checkpoints))
+        log(f"checkpoints: {out / 'checkpoints.csv'}")
     if args.plot and n_rows:
         from .plot import load_rows, write_report
         try:
-            write_report(load_rows(results_path), out / "report.html")
+            write_report(load_rows(results_path), out / "report.html", checkpoints=checkpoints)
             log(f"performance report: {out / 'report.html'}")
         except (OSError, ValueError) as e:
             log(f"[error] cannot write performance report: {e}")

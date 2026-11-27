@@ -1,6 +1,7 @@
 #include "metis_io.h"
 
 #include <algorithm>
+#include <chrono>
 #include <climits>
 #include <cmath>
 #include <cstdio>
@@ -131,6 +132,22 @@ SolverArrays to_solver_arrays(const MetisGraph& g) {
         a.bound[v] = static_cast<int>(b);
     }
     return a;
+}
+
+static std::chrono::steady_clock::time_point g_start = std::chrono::steady_clock::now();
+static bool g_reported = false;
+static long long g_best = 0;
+
+void start_clock() { g_start = std::chrono::steady_clock::now(); }
+
+void report_improvement(long long weight) {
+    if (g_reported && weight <= g_best) return;
+    g_reported = true;
+    g_best = weight;
+    const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_start).count();
+    std::fflush(stdout);  // keep order with the solvers' own printf output
+    std::printf("IMPROVE %.6f %lld\n", t, weight);
+    std::fflush(stdout);
 }
 
 void print_result(long long weight, const std::vector<int>& clique, double seconds, bool optimal) {

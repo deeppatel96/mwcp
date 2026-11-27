@@ -350,23 +350,136 @@ def _table(rows: List[dict], solvers: Sequence[str]) -> str:
 
 CSS = """
 svg .tick,svg .note{fill:var(--text2)}svg .value{font-variant-numeric:tabular-nums}
-path[style]{fill:var(--c)}.grid{stroke:var(--grid);stroke-width:1}
+path[style]:not(.qline){fill:var(--c)}.grid{stroke:var(--grid);stroke-width:1}
 .limit{stroke:var(--limit);stroke-width:1;stroke-dasharray:4 3}
 .whisker{stroke:var(--text);stroke-width:1.5;fill:none;opacity:.7}
 .hit{fill:transparent}.mark:hover .hit,.mark:focus .hit{fill:var(--grid);opacity:.5}.mark:focus{outline:none}
+.qline{fill:none;stroke:var(--c);stroke-width:2;stroke-linejoin:round}
+.cross{stroke:var(--text2);stroke-width:1}.cp{stroke:var(--text2);stroke-width:1}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:12px 0 0}
 .key{display:inline-flex;align-items:center;gap:6px;font-size:13px}
 .key i{width:12px;height:12px;border-radius:3px;background:var(--c);display:inline-block}
-""" + dark([("path[style]", "fill:var(--cd)"), (".key i", "background:var(--cd)")])
+""" + dark([("path[style]", "fill:var(--cd)"), (".key i", "background:var(--cd)"),
+                ("path.qline", "fill:none;stroke:var(--cd)")])
 
-JS = "bindTips(document);"
+JS = """bindTips(document);
+(function(){const h=document.getElementById('qhit');if(!h)return;
+const D=JSON.parse(document.getElementById('qdata').textContent),cr=document.getElementById('qcross'),svg=document.getElementById('qchart');
+function fmt(t){return t<1?(t*1000).toFixed(t<0.01?1:0)+' ms':t.toFixed(t<10?2:1)+' s';}
+h.addEventListener('mousemove',e=>{const p=svg.createSVGPoint();p.x=e.clientX;p.y=e.clientY;const q=p.matrixTransform(svg.getScreenCTM().inverse());
+  let i=0;for(let j=0;j<D.x.length;j++)if(D.x[j]<=q.x)i=j;
+  cr.setAttribute('x1',D.x[i]);cr.setAttribute('x2',D.x[i]);cr.style.display='';
+  showTip('at '+fmt(D.grid[i])+'\n'+Object.keys(D.series).map(s=>s+': '+D.series[s][i].toFixed(2)+'% gap').join('\n'),e.clientX,e.clientY);});
+h.addEventListener('mouseleave',()=>{cr.style.display='none';hideTip();});})();
+"""
 
 
 TIME = Metric("wall_time", "wall time", _fmt_s, _tick_label, MIN_TIME)
 MEMORY = Metric("peak_rss_mb", "peak memory", _fmt_mb, _tick_mb, MIN_MEM)
 
 
-def render_report(rows: List[dict], title: str = "Solver performance") -> str:
+
+# ---------------------------------------------------------------------------- quality over time
+
+def chart_quality(rows: List[dict], solvers: Sequence[str], colors, timeout: Optional[float],
+                  checkpoints: Optional[Sequence[float]] = None) -> Optional[str]:
+    """Mean relative gap to the best known weight over time, one step line per solver that
+    reports improvements, plus a table at the checkpoints. None if no run has a trace."""
+    from .quality import best_by_graph, default_checkpoints, weight_at
+    rows = [r for r in rows if r.get("status") != "unavailable"]
+    traced = [s for s in solvers if any(r.get("trace") for r in rows if r["solver"] == s)]
+    if not traced:
+        return None
+    best = best_by_graph(rows)
+    t_hi = timeout or max((r.get("wall_time") or 0) for r in rows) or 1.0
+    firsts = [r["trace"][0][0] for r in rows if r.get("trace")]
+    t_lo = max(1e-3, min(firsts) / 1.5)
+    if t_hi <= t_lo * 10:
+        t_lo = t_hi / 10
+    cps = list(checkpoints) if checkpoints else default_checkpoints(t_hi)
+    grid = sorted(set([t_lo * (t_hi / t_lo) ** (i / 119) for i in range(120)] + [c for c in cps if t_lo <= c <= t_hi]))
+
+    def mean_gap(solver: str, t: float) -> float:
+        vals = []
+        for r in rows:
+            if r["solver"] != solver:
+                continue
+            b = best.get(str(r.get("graph_name")))
+            w = weight_at(r, t)
+            vals.append(1.0 if (w is None or not b) else max(0.0, (b - w) / b))  # no clique yet: 100%
+        return 100.0 * sum(vals) / len(vals) if vals else float("nan")
+
+    series = {s: [mean_gap(s, t) for t in grid] for s in traced}
+    ymax_raw = max(max(v) for v in series.values())
+    step = _nice_step(max(ymax_raw, 0.5) / 4)
+    ymax = step * math.ceil(max(ymax_raw, 0.5) / step)
+    x0, x1, top, bottom = 56, WIDTH - 110, 16, 236
+    lx = lambda t: x0 + (math.log10(t) - math.log10(t_lo)) / (math.log10(t_hi) - math.log10(t_lo)) * (x1 - x0)  # noqa: E731
+    ly = lambda v: bottom - v / ymax * (bottom - top)  # noqa: E731
+    out = []
+    k = 0.0
+    while k <= ymax + 1e-9:
+        y = ly(k)
+        out.append(f'<line class="grid" x1="{x0}" x2="{x1}" y1="{y:.1f}" y2="{y:.1f}"/>'
+                   f'<text class="tick" x="{x0 - 8}" y="{y + 4:.1f}" text-anchor="end">{k:g}%</text>')
+        k += step
+    for d in range(math.ceil(math.log10(t_lo)), math.floor(math.log10(t_hi)) + 1):
+        t = 10.0 ** d
+        out.append(f'<text class="tick" x="{lx(t):.1f}" y="{bottom + 16}" text-anchor="middle">{_e(_tick_label(t))}</text>')
+    out.append(f'<line class="limit" x1="{lx(t_hi):.1f}" x2="{lx(t_hi):.1f}" y1="{top}" y2="{bottom}"/>'
+               f'<text class="tick" x="{lx(t_hi):.1f}" y="{bottom + 16}" text-anchor="middle">{_e(_fmt_s(t_hi))}</text>')
+    for c in cps:
+        if t_lo <= c < t_hi:
+            out.append(f'<line class="cp" x1="{lx(c):.1f}" x2="{lx(c):.1f}" y1="{bottom}" y2="{bottom + 4}"/>')
+    labels = []
+    for s in traced:
+        light, dark_ = colors[s]
+        pts = series[s]
+        d = f"M{lx(grid[0]):.1f},{ly(pts[0]):.1f}"
+        for i in range(1, len(grid)):
+            d += f"H{lx(grid[i]):.1f}V{ly(pts[i]):.1f}"
+        out.append(f'<path class="qline" d="{d}" style="--c:{light};--cd:{dark_}"/>')
+        labels.append([ly(pts[-1]), s, pts[-1]])
+    labels.sort()
+    for i in range(1, len(labels)):                      # keep end labels 14px apart
+        labels[i][0] = max(labels[i][0], labels[i - 1][0] + 14)
+    for y, s, v in labels:
+        out.append(f'<text class="value" x="{x1 + 8}" y="{y + 4:.1f}">{_e(s)} {v:.2f}%</text>')
+    data = {"grid": grid, "x": [round(lx(t), 1) for t in grid], "series": {s: [round(v, 3) for v in series[s]] for s in traced}}
+    out.append(f'<line id="qcross" class="cross" x1="0" x2="0" y1="{top}" y2="{bottom}" style="display:none"/>')
+    out.append(f'<rect id="qhit" x="{x0}" y="{top}" width="{x1 - x0}" height="{bottom - top}" fill="transparent"/>')
+    svg = (f'<svg id="qchart" viewBox="0 0 {WIDTH} {bottom + 28}" role="img" '
+           f'aria-label="Mean gap to the best known weight over time">' + "".join(out) + "</svg>"
+           f'<script type="application/json" id="qdata">{json.dumps(data, separators=(",", ":"))}</script>')
+
+    # Table at the checkpoints: mean gap and proofs, for every solver (untraced ones only once finished).
+    head = "".join(f"<th>{_e(_fmt_s(c))}</th>" for c in cps)
+    body = []
+    for s in solvers:
+        runs = [r for r in rows if r["solver"] == s]
+        if not runs:
+            continue
+        cells = []
+        for c in cps:
+            ws = [(weight_at(r, c), best.get(str(r.get("graph_name")))) for r in runs]
+            if not runs[0].get("trace") and any(w is None for w, _ in ws):
+                cells.append("<td>—</td>")
+                continue
+            g = [1.0 if (w is None or not b) else max(0.0, (b - w) / b) for w, b in ws]
+            proved = sum(1 for r in runs if r.get("proved_optimal") and
+                         ((r.get("wall_time") or 1e18) <= c or c >= float(r.get("timeout") or 1e18)))
+            cells.append(f"<td>{100 * sum(g) / len(g):.2f}%" + (f" <small>({proved} opt)</small>" if proved else "") + "</td>")
+        body.append(f"<tr><td>{_e(s)}</td>{''.join(cells)}</tr>")
+    table = (f"<table><thead><tr><th>solver</th>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>")
+    untraced = [s for s in solvers if s not in traced]
+    note = (f'<p class="foot">{_e(", ".join(untraced))} report no improvements while running, so '
+            f'{"it appears" if len(untraced) == 1 else "they appear"} in the table only once finished (— before).</p>'
+            if untraced else "")
+    return svg + table + note
+
+
+def render_report(rows: List[dict], title: str = "Solver performance",
+                  checkpoints: Optional[Sequence[float]] = None) -> str:
     rows = [r for r in rows if r.get("status") != "unavailable"]
     if not rows:
         raise ValueError("no solver results to plot")
@@ -413,6 +526,12 @@ def render_report(rows: List[dict], title: str = "Solver performance") -> str:
             if limited:
                 parts.append(f'<p class="foot">{_e(", ".join(limited))} ran until the time limit in every run, '
                              f'so {"its" if len(limited) == 1 else "their"} time shows the limit, not speed.</p>')
+    q = chart_quality(rows, solvers, colors, timeout, checkpoints)
+    if q:
+        parts += ["<h2>Quality over time</h2>",
+                  '<p class="foot">Mean gap to the best weight any solver found on each graph, from one run '
+                  'per solver (its improvement times). A run with no clique yet counts as 100%. Log time axis; '
+                  'hover for values.</p>', q]
     if n_graphs > 1:
         for metric, heading in ((TIME, "Wall time"), (MEMORY, "Peak memory")):
             graphs = per_graph(metric)
@@ -428,8 +547,9 @@ def render_report(rows: List[dict], title: str = "Solver performance") -> str:
     return page(title, CSS, "".join(parts), JS)
 
 
-def write_report(rows: List[dict], path: Path, title: str = "Solver performance") -> Path:
+def write_report(rows: List[dict], path: Path, title: str = "Solver performance",
+                 checkpoints: Optional[Sequence[float]] = None) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_report(rows, title))
+    path.write_text(render_report(rows, title, checkpoints))
     return path

@@ -158,7 +158,9 @@ def _cmd_plot(args) -> int:
         rows = [r for r in rows if str(r.get("graph_name")) in keep]
     out = Path(args.out) if args.out else (src if src.is_dir() else src.parent) / "report.html"
     try:
-        write_report(rows, out, title=args.title)
+        from .batch import parse_checkpoints
+        cps = parse_checkpoints(args.checkpoints) if args.checkpoints else None
+        write_report(rows, out, title=args.title, checkpoints=cps)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -307,6 +309,9 @@ def build_parser() -> argparse.ArgumentParser:
     x.add_argument("--draw", action="store_true",
                    help="also write a clique view per graph and seed to OUT/cliques/ (.html, .dot, .svg)")
     _add_draw_limits(x)
+    x.add_argument("--checkpoints", metavar="SECONDS",
+                   help="comma list of times (e.g. 5,10,20,30,60): write OUT/checkpoints.csv with each "
+                        "solver's best weight and gap at those times, read from one run's improvement trace")
     x.add_argument("--plot", action="store_true",
                    help="also write OUT/report.html, comparing the solvers' wall time and peak memory")
     x.set_defaults(func=_cmd_batch)
@@ -316,6 +321,8 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("-o", "--out", metavar="PATH", help="report path (default: report.html next to the results)")
     pl.add_argument("--graphs", metavar="NAMES", help="comma list of graph names to include (default: all)")
     pl.add_argument("--title", default="Solver performance", help="report title")
+    pl.add_argument("--checkpoints", metavar="SECONDS", help="times for the quality-over-time table "
+                                                               "(default: 1, 2, 5, 10, ... up to the time limit)")
     pl.set_defaults(func=_cmd_plot)
 
     c = sub.add_parser("cover", help="the heaviest hypotheses (cliques) up to a probability coverage; "

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 class Status:
@@ -22,6 +22,9 @@ class SolverResult:
     solver_time: Optional[float] = None   # time reported by the solver itself
     wall_time: Optional[float] = None     # wall time measured by the wrapper
     peak_rss_mb: Optional[float] = None   # peak resident memory of the solver process (MiB)
+    # (seconds since the solver process started, weight) at every improvement; empty for
+    # solvers that don't report improvements
+    trace: List[Tuple[float, int]] = field(default_factory=list)
     message: str = ""
     returncode: Optional[int] = None
 

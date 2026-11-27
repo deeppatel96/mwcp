@@ -122,6 +122,7 @@ class Solver(ABC):
             run = run_measured(cmd, timeout + grace_seconds(timeout), workdir)
             res.wall_time, res.peak_rss_mb = run.wall_time, run.peak_rss_mb
             if run.timed_out:
+                res.trace = parse_trace(run.out or "")   # improvements before the kill still count
                 res.status = Status.TIMEOUT
                 res.message = f"killed after {timeout + grace_seconds(timeout):.1f}s wall time"
                 return res
@@ -138,6 +139,7 @@ class Solver(ABC):
                 res.message = f"could not parse solver output: {e}"
                 return res
 
+        res.trace = parse_trace(out)
         g = inst.graph
         res.weight, res.clique, res.proved_optimal, res.solver_time = weight, sorted(clique), optimal, stime
         why = g.clique_violation(res.clique)
@@ -150,6 +152,14 @@ class Solver(ABC):
         else:
             res.status = Status.OK
         return res
+
+
+_IMPROVE_RE = re.compile(r"^IMPROVE (\S+) (-?\d+)\s*$", re.M)
+
+
+def parse_trace(stdout: str) -> List[Tuple[float, int]]:
+    """IMPROVE lines (drivers/common/metis_io.cpp report_improvement) as [(seconds, weight)]."""
+    return [(float(t), int(w)) for t, w in _IMPROVE_RE.findall(stdout)]
 
 
 _RESULT_RE = re.compile(r"^RESULT weight=(-?\d+) size=(\d+) time=(\S+) optimal=([01])\s*$", re.M)
